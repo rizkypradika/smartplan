@@ -1,84 +1,103 @@
-#include <Wire.h>
-#include <LiquidCrystal_I2C.h>
 #include <ESP8266WiFi.h>
-#include <FirebaseESP8266.h> // For ESP8266
+#include <Wire.h> 
+#include <LiquidCrystal_I2C.h>
 #include <DHT.h>
+#include <FirebaseESP8266.h>  // Pastikan library Firebase ESP8266 yang benar digunakan
 
 // Inisialisasi objek LCD dengan dimensi 20x4
-LiquidCrystal_I2C lcd(0x27, 20, 4);
-
-// Firebase credentials
-#define FIREBASE_HOST "https://deteksikelembabandansuhu-default-rtdb.firebaseio.com/"
-#define FIREBASE_AUTH "zRWgHIYrsMFk1xy38ztSu7DYlJoLTIeeNFlpErFn"
-#define WIFI_SSID "SKK-STUDENT"
-#define WIFI_PASSWORD "sistemkomputerkontrol"
+LiquidCrystal_I2C lcd(0x27, 20, 4); 
 
 // Definisikan pin data DHT22 dan tipe sensor
-#define DHTPIN D5
-#define DHTTYPE DHT22
+#define DHTPIN D5     
+#define DHTTYPE DHT22   
+
+// Pin untuk sensor kelembaban tanah
+#define SOIL_MOISTURE_PIN A0
+
+// Nilai kalibrasi sensor kelembaban tanah
+#define DRY_VALUE 0 // Nilai saat tanah kering (kalibrasi)
+#define WET_VALUE 1023 // Nilai saat tanah basah (kalibrasi)
+
+// Data Firebase
+#define FIREBASE_HOST "https://deteksikelembabandansuhu-default-rtdb.firebaseio.com/"
+#define FIREBASE_AUTH "zRWgHIYrsMFk1xy38ztSu7DYlJoLTIeeNFlpErFn"
+#define WIFI_SSID "KOST PUTRI BIDADARI 4"
+#define WIFI_PASSWORD "12341234"
 
 // Inisialisasi sensor DHT
 DHT dht(DHTPIN, DHTTYPE);
 
-// Definisikan pin sensor kelembaban tanah
-#define SOIL_MOISTURE_PIN A0
-
-// Nilai kalibrasi (sesuaikan setelah melakukan kalibrasi)
-#define DRY_VALUE 0 // Nilai saat tanah kering
-#define WET_VALUE 1023 // Nilai saat tanah basah
-
-// Inisialisasi objek FirebaseData
+// Inisialisasi Firebase
 FirebaseData firebaseData;
+FirebaseConfig firebaseConfig;
+FirebaseAuth firebaseAuth;
 
 void setup() {
-  // Inisialisasi komunikasi I2C pada pin D6 (SDA) dan D7 (SCL)
+  Serial.begin(115200);
+  dht.begin();
+
+  // Koneksi WiFi
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("Connecting to ");
+  Serial.print(WIFI_SSID);
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(500);
+  }
+
+  Serial.println();
+  Serial.print("Connected, IP Address: ");
+  Serial.println(WiFi.localIP());
+
+  // Konfigurasi Firebase
+  firebaseConfig.host = FIREBASE_HOST;
+  firebaseConfig.signer.tokens.legacy_token = FIREBASE_AUTH;
+
+  // Mulai Firebase
+  Firebase.begin(&firebaseConfig, &firebaseAuth);
+  Firebase.reconnectWiFi(true);
+
+  // Inisialisasi komunikasi I2C pada pin D1 (SDA) dan D2 (SCL)
   Wire.begin(D1, D2);
 
-  lcd.begin();
-  lcd.backlight(); // Nyalakan backlight
-
-  dht.begin(); // Inisialisasi sensor DHT
+  lcd.begin();        // Inisialisasi LCD
+  lcd.backlight();    // Nyalakan backlight
 
   lcd.setCursor(0, 0); // Set kursor di kolom 0, baris 0
   lcd.print("Halo, Wemos!");
-  delay(2000); // Tampilkan pesan awal selama 2 detik
-  lcd.clear(); // Bersihkan layar
-
-  // Hubungkan ke Wi-Fi
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-
-  // Inisialisasi Firebase
-  Firebase.begin(FIREBASE_HOST, FIREBASE_AUTH);
-  Firebase.reconnectWiFi(true);
+  delay(2000);        // Tampilkan pesan awal selama 2 detik
+  lcd.clear();        // Bersihkan layar
 }
 
 void loop() {
-  // Baca data sensor DHT (kelembaban udara dan suhu)
+  // Baca data dari sensor DHT22
   float h = dht.readHumidity();
   float t = dht.readTemperature();
 
-  // Cek jika pembacaan data dari DHT berhasil
+  // Baca data dari sensor kelembaban tanah (soil moisture)
+  int soilMoistureValue = analogRead(SOIL_MOISTURE_PIN);
+
+  // Konversi nilai analog ke persentase (0-100%) menggunakan nilai kalibrasi
+  int soilMoisturePercent = map(soilMoistureValue, DRY_VALUE, WET_VALUE, 0, 100);
+  soilMoisturePercent = constrain(soilMoisturePercent, 0, 100); // Batasi antara 0-100%
+
+  // Debug output
+  Serial.print("Humidity: ");
+  Serial.print(h);
+  Serial.print(" %  Temperature: ");
+  Serial.print(t);
+  Serial.print(" C  Soil Moisture: ");
+  Serial.print(soilMoisturePercent);
+  Serial.println(" %");
+
+  // Cek jika pembacaan data DHT22 berhasil
   if (isnan(h) || isnan(t)) {
     lcd.setCursor(0, 0);
     lcd.print("Failed to read");
-    lcd.setCursor(0, 1);
-    lcd.print("from DHT sensor!");
+    lcd.print(" from DHT sensor!");
     delay(2000);
     return;
   }
-
-  // Baca data sensor kelembaban tanah
-  int soilMoistureValue = analogRead(SOIL_MOISTURE_PIN);
-
-  // Konversi nilai analog ke persentase (menggunakan nilai kalibrasi)
-  int soilMoisturePercent = map(soilMoistureValue, DRY_VALUE, WET_VALUE, 0, 100);
-
-  // Pastikan persentase tetap dalam rentang 0-100%
-  soilMoisturePercent = constrain(soilMoisturePercent, 0, 100);
 
   // Tampilkan data kelembaban tanah pada LCD
   lcd.setCursor(0, 0);
@@ -100,16 +119,25 @@ void loop() {
 
   delay(2000); // Tunggu 2 detik sebelum pembacaan berikutnya
 
-  // Push data ke Firebase
-  if (Firebase.pushString(firebaseData, "/DHT22/Humidity", String(h))) {
-    Serial.println("Humidity pushed successfully");
+  // Kirim data ke Firebase
+  if (Firebase.setFloat(firebaseData, "/Ardianti/Humidity", h)) {
+    Serial.println("Humidity data sent successfully");
   } else {
-    Serial.println("Failed to push humidity: " + firebaseData.errorReason());
+    Serial.print("Failed to send humidity data: ");
+    Serial.println(firebaseData.errorReason());
   }
 
-  if (Firebase.pushString(firebaseData, "/DHT22/Temperature", String(t))) {
-    Serial.println("Temperature pushed successfully");
+  if (Firebase.setFloat(firebaseData, "/Ardianti/Temperature", t)) {
+    Serial.println("Temperature data sent successfully");
   } else {
-    Serial.println("Failed to push temperature: " + firebaseData.errorReason());
+    Serial.print("Failed to send temperature data: ");
+    Serial.println(firebaseData.errorReason());
+  }
+
+  if (Firebase.setInt(firebaseData, "/Ardianti/SoilMoisture", soilMoisturePercent)) {
+    Serial.println("Soil moisture data sent successfully");
+  } else {
+    Serial.print("Failed to send soil moisture data: ");
+    Serial.println(firebaseData.errorReason());
   }
 }
